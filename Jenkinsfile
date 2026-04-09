@@ -1,45 +1,48 @@
 pipeline {
     agent any
-
+    
     environment {
-        NODE_ENV  = 'test'
-        BUILD_DIR = 'dist'
-        APP_NAME  = 'kijanikiosk-payments'
+        REPO_URL = 'https://github.com/sololemons/java-to-do.git'
+        REPO_BRANCH = 'main'
     }
-
-    options {
-        timeout(time: 15, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-    }
-
+    
     stages {
-        stage('Build') {
+        stage("Clone repo") {
             steps {
-                echo "Build stage: TODO"
+                echo "Starting clone process..."
+                git branch: env.REPO_BRANCH, url: env.REPO_URL
             }
         }
-        stage('Test') {
+        
+        stage("Build code") {
             steps {
-                echo "Test stage: TODO"
+                echo "Compiling code and building the application..."
+                sh './gradlew build -x test'
             }
         }
-        stage('Archive') {
+        
+        stage("Test code") {
             steps {
-                echo "Archive stage: TODO"
+                echo "Running automated tests..."
+                sh './gradlew test'
             }
         }
     }
-
+    
     post {
-        success {
-            echo "Pipeline succeeded: ${APP_NAME} build ${BUILD_NUMBER}"
-        }
-        failure {
-            echo "Pipeline FAILED: ${APP_NAME} build ${BUILD_NUMBER} - check logs"
-        }
         always {
-            echo "Build URL: ${BUILD_URL}"
+            echo "Gathering test results for visualization..."
+            junit 'build/test-results/**/*.xml' 
+        }
+        
+        success {
+            echo "✅ SUCCESS: The build and tests passed!"
+            echo "Archiving run results and build artifacts..."
+            archiveArtifacts artifacts: 'build/libs/*.*', fingerprint: true
+        }
+        
+        failure {
+            echo "❌ FAILURE: Something broke. Check the Test Results graph or the logs to see what failed."
         }
     }
 }
