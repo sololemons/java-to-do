@@ -1,48 +1,66 @@
 pipeline {
     agent any
-    
+
     environment {
-        REPO_URL = 'https://github.com/sololemons/java-to-do.git'
-        REPO_BRANCH = 'main'
+        // Adjusted for the Java project
+        APP_ENV   = 'test'
+        BUILD_DIR = 'build/libs' // Gradle places the compiled .jar files here
+        APP_NAME  = 'java-todo'
     }
-    
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+
     stages {
-        stage("Clone repo") {
+        stage('Build') {
             steps {
-                echo "Starting clone process..."
-                git branch: env.REPO_BRANCH, url: env.REPO_URL
-            }
-        }
-        
-        stage("Build code") {
-            steps {
+                // Gradle handles downloading dependencies automatically during the build
                 echo "Compiling code and building the application..."
-                sh './gradlew build -x test'
+                sh './gradlew clean build -x test'
+                
+                echo "Verifying build directory '${env.BUILD_DIR}' exists..."
+                // The 'test -d' command checks if the directory exists
+                sh "test -d ${env.BUILD_DIR} || (echo 'Error: Build directory not found!' && exit 1)"
             }
         }
-        
-        stage("Test code") {
+        stage('Test') {
             steps {
-                echo "Running automated tests..."
-                sh './gradlew test'
+                echo "Running unit tests..."
+                // 'set -e' ensures the script immediately exits if gradlew test fails
+                sh 'set -e; ./gradlew test'
+            }
+            post {
+                always {
+                    echo "Publishing test results..."
+                    // Points specifically to where Gradle outputs JUnit XML files
+                    junit allowEmptyResults: true, testResults: 'build/test-results/**/*.xml'
+                }
+            }
+        }
+        stage('Archive') {
+            steps {
+                echo "Archiving build outputs..."
+                // Grabs the compiled Java .jar or .war files from the build directory
+                archiveArtifacts artifacts: "${env.BUILD_DIR}/*.*", fingerprint: true
             }
         }
     }
-    
+
     post {
-        always {
-            echo "Gathering test results for visualization..."
-            junit 'build/test-results/**/*.xml' 
-        }
-        
         success {
-            echo "✅ SUCCESS: The build and tests passed!"
-            echo "Archiving run results and build artifacts..."
-            archiveArtifacts artifacts: 'build/libs/*.*', fingerprint: true
+            echo "✅ SUCCESS: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} completed!"
+            echo "Artifacts are available at: ${env.BUILD_URL}artifact/"
         }
-        
         failure {
-            echo "❌ FAILURE: Something broke. Check the Test Results graph or the logs to see what failed."
+            echo "❌ FAILURE: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} failed."
+            echo "Hint: Check the logs at ${env.BUILD_URL}console to debug."
+        }
+        always {
+            echo "Wiping workspace to ensure a clean state for the next run..."
+            cleanWs()
         }
     }
 }
