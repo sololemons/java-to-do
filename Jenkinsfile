@@ -7,7 +7,7 @@ pipeline {
         APP_NAME  = 'java-todo'
         
         // 1. FIXED: Changed \\$2 to \$2 so Groovy doesn't crash
-        PKG_VERSION = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \\$2}'", returnStdout: true).trim()
+        PKG_VERSION = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \$2}'", returnStdout: true).trim()
         GIT_SHORT   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         ARTIFACT_VERSION = "${PKG_VERSION}-${GIT_SHORT}"
     }
