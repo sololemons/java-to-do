@@ -2,10 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Adjusted for the Java project
         APP_ENV   = 'test'
-        BUILD_DIR = 'build/libs' // Gradle places the compiled .jar files here
+        BUILD_DIR = 'build/libs' 
         APP_NAME  = 'java-todo'
+        
+        PKG_VERSION = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \\$2}'", returnStdout: true).trim()
+        GIT_SHORT   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        ARTIFACT_VERSION = "${PKG_VERSION}-${GIT_SHORT}"
     }
 
     options {
@@ -17,42 +20,87 @@ pipeline {
     stages {
         stage('Build') {
             steps {
-                // Gradle handles downloading dependencies automatically during the build
                 echo "Compiling code and building the application..."
                 sh './gradlew clean build -x test'
                 
                 echo "Verifying build directory '${env.BUILD_DIR}' exists..."
-                // The 'test -d' command checks if the directory exists
                 sh "test -d ${env.BUILD_DIR} || (echo 'Error: Build directory not found!' && exit 1)"
             }
+            post {
+                success {
+                    echo "Build successful! Artifacts are in '${env.BUILD_DIR}'."
+                }
+                failure {
+                    echo "Build failed. Check the logs for details."
+                }
+            }
         }
+        
         stage('Test') {
             steps {
                 echo "Running unit tests..."
-                // 'set -e' ensures the script immediately exits if gradlew test fails
                 sh 'set -e; ./gradlew test'
             }
             post {
                 always {
                     echo "Publishing test results..."
-                    // Points specifically to where Gradle outputs JUnit XML files
                     junit allowEmptyResults: true, testResults: 'build/test-results/**/*.xml'
+                }
+                success {
+                    echo "All tests passed successfully!"
+                }
+                failure {
+                    echo "Some tests failed. Check the test results for details."
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                echo "Archiving build outputs locally in Jenkins..."
+                archiveArtifacts artifacts: "${env.BUILD_DIR}/*.*", fingerprint: true
+            }
+                post {
+                    success {
+                        echo "Artifacts archived successfully in Jenkins."
+                    }
+                    failure {
+                        echo "Failed to archive artifacts. Check the logs for details."
+                    }
+                }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                echo "Publishing artifact version ${env.ARTIFACT_VERSION} to Nexus..."
+                
+                withCredentials([usernamePassword(credentialsId: 'nexus-creds', passwordVariable: 'NEXUS_PASS', usernameVariable: 'NEXUS_USER')]) {
+                    sh """
+                        # Find the generated .jar file
+                        JAR_FILE=\$(ls ${env.BUILD_DIR}/*.jar | head -n 1)
+                        
+                        # Upload to Nexus using curl. 
+                        # We use \$NEXUS_USER and \$NEXUS_PASS from the withCredentials block.
+                        # Jenkins will automatically mask these in the console output (replace with ****).
+                        curl -u "\${NEXUS_USER}:\${NEXUS_PASS}" --upload-file "\${JAR_FILE}" http://localhost:8081/repository/my-java-repo/${env.APP_NAME}-${env.ARTIFACT_VERSION}.jar
+                    """
                 }
             }
         }
-        stage('Archive') {
-            steps {
-                echo "Archiving build outputs..."
-                // Grabs the compiled Java .jar or .war files from the build directory
-                archiveArtifacts artifacts: "${env.BUILD_DIR}/*.*", fingerprint: true
+        post {
+            success {
+                echo "Artifact published to Nexus successfully!"
+            }
+            failure {
+                echo "Failed to publish artifact to Nexus. Check the logs for details."
             }
         }
+        
     }
 
     post {
         success {
             echo "✅ SUCCESS: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} completed!"
-            echo "Artifacts are available at: ${env.BUILD_URL}artifact/"
+            echo "Version ${env.ARTIFACT_VERSION} successfully published to Nexus."
         }
         failure {
             echo "❌ FAILURE: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} failed."
