@@ -81,7 +81,7 @@ pipeline {
                         JAR_FILE=\$(ls ${env.BUILD_DIR}/*.jar | head -n 1)
                         
                         # Upload to Nexus using curl securely 
-                        curl -u "\${NEXUS_USER}:\${NEXUS_PASS}" --upload-file "\${JAR_FILE}" http://nexus:8081/repository/my-java-repo/${env.APP_NAME}-${env.ARTIFACT_VERSION}.jar
+                        curl -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" --upload-file "\${JAR_FILE}" http://nexus:8081/repository/java-repo/${env.APP_NAME}-${env.ARTIFACT_VERSION}.jar
                     """
                 }
             }
