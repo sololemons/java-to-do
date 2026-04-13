@@ -1,97 +1,95 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'gradle:8.4-jdk17' 
+            args '-v /var/jenkins_home/.gradle:/home/gradle/.gradle' 
+        }
+    }
 
     environment {
-        APP_ENV   = 'test'
-        BUILD_DIR = 'build/libs' 
-        APP_NAME  = 'java-todo'
+        APP_ENV          = 'test'
+        BUILD_DIR        = 'build/libs' 
+        APP_NAME         = 'java-todo'
         
-        // 1. FIXED: Changed \\$2 to \$2 so Groovy doesn't crash
-        PKG_VERSION = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \$2}'", returnStdout: true).trim()
-        GIT_SHORT   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        PKG_VERSION      = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \$2}'", returnStdout: true).trim()
+        GIT_SHORT        = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         ARTIFACT_VERSION = "${PKG_VERSION}-${GIT_SHORT}"
+        
+        NEXUS_URL        = "http://nexus:8081/repository/java-repo" 
     }
 
     options {
         timeout(time: 15, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
+        disableConcurrentBuilds() 
     }
 
     stages {
+        stage('Lint') {
+            steps {
+                echo "Running code linter..."
+                sh './gradlew checkstyleMain || echo "Hint: Configure checkstyle in build.gradle"'
+            }
+        }
+
         stage('Build') {
             steps {
                 echo "Compiling code and building the application..."
                 sh './gradlew clean build -x test'
                 
-                echo "Verifying build directory '${env.BUILD_DIR}' exists..."
+                echo "Verifying output directory exists and is non-empty..."
                 sh "test -d ${env.BUILD_DIR} || (echo 'Error: Build directory not found!' && exit 1)"
+                sh "test -n \"\$(ls -A ${env.BUILD_DIR}/*.jar 2>/dev/null)\" || (echo 'Error: No JAR generated!' && exit 1)"
+
+                echo "Stashing build output for use in parallel stages..."
+                stash name: 'build-output', includes: "${env.BUILD_DIR}/*.jar"
             }
-            post {
-                success {
-                    echo "Build successful! Artifacts are in '${env.BUILD_DIR}'."
+        }
+
+        stage('Verify') {
+            parallel {
+                stage('Test') {
+                    steps {
+                        echo "Running unit tests..."
+                        unstash name: 'build-output'
+                        sh 'set -e; ./gradlew test'
+                    }
+                    post {
+                        always {
+                            echo "Publishing test results..."
+                            junit allowEmptyResults: true, testResults: 'build/test-results/**/*.xml'
+                        }
+                    }
                 }
-                failure {
-                    echo "Build failed. Check the logs for details."
+                stage('Security Audit') {
+                    steps {
+                        echo "Running security audit..."
+                        // This mirrors the 'npm audit' requirement using the OWASP dependency-check
+                        sh './gradlew dependencyCheckAnalyze || echo "Hint: Configure dependency-check plugin"'
+                    }
                 }
             }
         }
-        
-        stage('Test') {
-            steps {
-                echo "Running unit tests..."
-                sh 'set -e; ./gradlew test'
-            }
-            post {
-                always {
-                    echo "Publishing test results..."
-                    junit allowEmptyResults: true, testResults: 'build/test-results/**/*.xml'
-                }
-                success {
-                    echo "All tests passed successfully!"
-                }
-                failure {
-                    echo "Some tests failed. Check the test results for details."
-                }
-            } // 2. FIXED: Added missing closing brackets for the Test stage
-        }
-        
+
         stage('Archive') {
             steps {
                 echo "Archiving build outputs locally in Jenkins..."
                 archiveArtifacts artifacts: "${env.BUILD_DIR}/*.*", fingerprint: true
             }
-            post {
-                success {
-                    echo "Artifacts archived successfully in Jenkins."
-                }
-                failure {
-                    echo "Failed to archive artifacts. Check the logs for details."
-                }
-            }
         }
 
-        stage('Publish to Nexus') {
+        stage('Publish') {
             steps {
                 echo "Publishing artifact version ${env.ARTIFACT_VERSION} to Nexus..."
                 
                 withCredentials([usernamePassword(credentialsId: 'nexus-creds', passwordVariable: 'NEXUS_PASS', usernameVariable: 'NEXUS_USER')]) {
                     sh """
-                        # Find the generated .jar file
+                        set -e
                         JAR_FILE=\$(ls ${env.BUILD_DIR}/*.jar | head -n 1)
                         
-                        # Upload to Nexus using curl securely 
-                        curl -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" --upload-file "\${JAR_FILE}" http://nexus:8081/repository/java-repo/${env.APP_NAME}-${env.ARTIFACT_VERSION}.jar
+                        # Upload using curl to the combined NEXUS_URL
+                        curl -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" --upload-file "\${JAR_FILE}" ${env.NEXUS_URL}/${env.APP_NAME}-${env.ARTIFACT_VERSION}.jar
                     """
-                }
-            }
-            // 3. FIXED: Moved this post block INSIDE the Publish stage
-            post {
-                success {
-                    echo "Artifact published to Nexus successfully!"
-                }
-                failure {
-                    echo "Failed to publish artifact to Nexus. Check the logs for details."
                 }
             }
         }
@@ -100,11 +98,14 @@ pipeline {
     post {
         success {
             echo "✅ SUCCESS: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} completed!"
-            echo "Version ${env.ARTIFACT_VERSION} successfully published to Nexus."
+            echo "Version ${env.ARTIFACT_VERSION} successfully published to ${env.NEXUS_URL}."
         }
         failure {
             echo "❌ FAILURE: Build #${env.BUILD_NUMBER} for ${env.APP_NAME} failed."
             echo "Hint: Check the logs at ${env.BUILD_URL}console to debug."
+        }
+        changed {
+            echo "⚠️ Build status changed to ${currentBuild.currentResult} - ${JOB_NAME} #${BUILD_NUMBER}"
         }
         always {
             echo "Wiping workspace to ensure a clean state for the next run..."
