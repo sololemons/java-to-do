@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'gradle:8.4-jdk17' 
+            image 'gradle:8.10.2-jdk17'
         }
     }
 
@@ -23,7 +23,7 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         disableConcurrentBuilds() 
     }
-    
+
     stages {
         stage('Lint') {
             steps {
