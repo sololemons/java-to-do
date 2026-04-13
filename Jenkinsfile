@@ -17,6 +17,7 @@ pipeline {
         
         NEXUS_URL        = "http://nexus:8081/repository/java-repo" 
     }
+    
 
     options {
         timeout(time: 15, unit: 'MINUTES')
