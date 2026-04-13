@@ -2,7 +2,6 @@ pipeline {
     agent {
         docker {
             image 'gradle:8.4-jdk17' 
-            args '-v /var/jenkins_home/.gradle:/home/gradle/.gradle' 
         }
     }
 
@@ -10,6 +9,7 @@ pipeline {
         APP_ENV          = 'test'
         BUILD_DIR        = 'build/libs' 
         APP_NAME         = 'java-todo'
+        GRADLE_USER_HOME = "${WORKSPACE}/.gradle_cache"
         
         PKG_VERSION      = sh(script: "./gradlew properties -q | grep '^version:' | awk '{print \$2}'", returnStdout: true).trim()
         GIT_SHORT        = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
