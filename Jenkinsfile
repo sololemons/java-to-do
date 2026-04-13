@@ -24,6 +24,8 @@ pipeline {
         disableConcurrentBuilds() 
     }
 
+    
+
     stages {
         stage('Lint') {
             steps {
