@@ -2,6 +2,7 @@ pipeline {
     agent {
         docker {
             image 'gradle:8.10.2-jdk21'
+            args '--network cicd-net'
         }
     }
 
@@ -17,7 +18,7 @@ pipeline {
         
         NEXUS_URL        = "http://nexus:8081/repository/java-repo" 
     }
-    
+
     
     options {
         timeout(time: 15, unit: 'MINUTES')
@@ -65,7 +66,6 @@ pipeline {
                 stage('Security Audit') {
                     steps {
                         echo "Running security audit..."
-                        // This mirrors the 'npm audit' requirement using the OWASP dependency-check
                         sh './gradlew dependencyCheckAnalyze || echo "Hint: Configure dependency-check plugin"'
                     }
                 }
